@@ -92,10 +92,10 @@ debug_mode = os.getenv("DEBUG_RAG_API", "False").lower() in (
 )
 console_json = get_env_variable("CONSOLE_JSON", "False").lower() == "true"
 
-if debug_mode:
-    logger.setLevel(logging.DEBUG)
-else:
-    logger.setLevel(logging.INFO)
+#if debug_mode:
+logger.setLevel(logging.DEBUG)
+#else:
+#    logger.setLevel(logging.INFO)
 
 if console_json:
 
@@ -297,6 +297,8 @@ else:
     raise ValueError(f"Unsupported vector store type: {VECTOR_DB_TYPE}")
 
 retriever = vector_store.as_retriever()
+
+
 
 known_source_ext = [
     "go",
