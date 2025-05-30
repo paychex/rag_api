@@ -13,6 +13,11 @@ from app.services.vector_store.factory import get_vector_store
 
 load_dotenv(find_dotenv())
 
+LOGS_DIR = "./logs"
+if not os.path.exists(LOGS_DIR):
+    os.makedirs(LOGS_DIR, exist_ok=True)
+
+LOG_FILE_PATH = os.path.join(LOGS_DIR, "app.log")
 
 class VectorDBType(Enum):
     PGVECTOR = "pgvector"
@@ -130,6 +135,10 @@ else:
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
+
+file_handler = logging.FileHandler(LOG_FILE_PATH)
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 
 handler = logging.StreamHandler()  # or logging.FileHandler("app.log")
 handler.setFormatter(formatter)
