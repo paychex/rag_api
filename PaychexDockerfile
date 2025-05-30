@@ -23,4 +23,6 @@ ENV SCARF_NO_ANALYTICS=true
 
 COPY . .
 
+RUN cat /app/paychex-root.pem >> $(python -c "import certifi; print(certifi.where())")
+
 CMD ["python", "main.py"]
