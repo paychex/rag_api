@@ -1,11 +1,12 @@
 # app/config.py
-import os
 import json
-import boto3
 import logging
+import os
 import urllib.parse
-from enum import Enum
 from datetime import datetime
+from enum import Enum
+
+import boto3
 from dotenv import find_dotenv, load_dotenv
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -18,6 +19,7 @@ if not os.path.exists(LOGS_DIR):
     os.makedirs(LOGS_DIR, exist_ok=True)
 
 LOG_FILE_PATH = os.path.join(LOGS_DIR, "app.log")
+
 
 class VectorDBType(Enum):
     PGVECTOR = "pgvector"
@@ -92,10 +94,10 @@ debug_mode = os.getenv("DEBUG_RAG_API", "False").lower() in (
 )
 console_json = get_env_variable("CONSOLE_JSON", "False").lower() == "true"
 
-#if debug_mode:
-logger.setLevel(logging.DEBUG)
-#else:
-#    logger.setLevel(logging.INFO)
+if debug_mode:
+    logger.setLevel(logging.DEBUG)
+else:
+    logger.setLevel(logging.INFO)
 
 if console_json:
 
@@ -297,7 +299,6 @@ else:
     raise ValueError(f"Unsupported vector store type: {VECTOR_DB_TYPE}")
 
 retriever = vector_store.as_retriever()
-
 
 
 known_source_ext = [
