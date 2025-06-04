@@ -1,11 +1,12 @@
 # app/config.py
-import os
 import json
-import boto3
 import logging
+import os
 import urllib.parse
-from enum import Enum
 from datetime import datetime
+from enum import Enum
+
+import boto3
 from dotenv import find_dotenv, load_dotenv
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -288,6 +289,7 @@ else:
     raise ValueError(f"Unsupported vector store type: {VECTOR_DB_TYPE}")
 
 retriever = vector_store.as_retriever()
+
 
 known_source_ext = [
     "go",
