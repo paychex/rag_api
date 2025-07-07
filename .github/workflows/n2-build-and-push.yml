@@ -27,8 +27,8 @@ jobs:
 
             - name: build and push docker container
               run: |
-                docker build . -t ${{ env.ACR_HOST }}/paychex/rag_api:n2a.${{ github.sha }}
+                docker build -t ${{ env.ACR_HOST }}/paychex/rag_api:n2a.${{ github.sha }} -f ./PaychexDockerfile .
                 docker push ${{ env.ACR_HOST }}/paychex/rag_api:n2a.${{ github.sha }}
 
-                docker build . -t ${{ env.ACR_HOST }}/paychex/rag_api:n2a.latest
+                docker build -t ${{ env.ACR_HOST }}/paychex/rag_api:n2a.latest -f ./PaychexDockerfile .
                 docker push ${{ env.ACR_HOST }}/paychex/rag_api:n2a.latest
