@@ -31,17 +31,22 @@ from app.models import (
     QueryMultipleBody,
 )
 from app.services.vector_store.async_pg_vector import AsyncPgVector
-from app.utils.document_loader import get_loader, clean_text, process_documents
+from app.utils.document_loader import (
+    get_loader,
+    clean_text,
+    process_documents,
+    cleanup_temp_encoding_file,
+)
 from app.utils.health import is_health_ok
 
 router = APIRouter()
 
 
 @router.get("/ids")
-async def get_all_ids():
+async def get_all_ids(request: Request):
     try:
         if isinstance(vector_store, AsyncPgVector):
-            ids = await vector_store.get_all_ids()
+            ids = await vector_store.get_all_ids(executor=request.app.state.thread_pool)
         else:
             ids = vector_store.get_all_ids()
 
@@ -80,11 +85,15 @@ async def health_check():
 
 
 @router.get("/documents", response_model=list[DocumentResponse])
-async def get_documents_by_ids(ids: list[str] = Query(...)):
+async def get_documents_by_ids(request: Request, ids: list[str] = Query(...)):
     try:
         if isinstance(vector_store, AsyncPgVector):
-            existing_ids = await vector_store.get_filtered_ids(ids)
-            documents = await vector_store.get_documents_by_ids(ids)
+            existing_ids = await vector_store.get_filtered_ids(
+                ids, executor=request.app.state.thread_pool
+            )
+            documents = await vector_store.get_documents_by_ids(
+                ids, executor=request.app.state.thread_pool
+            )
         else:
             existing_ids = vector_store.get_filtered_ids(ids)
             documents = vector_store.get_documents_by_ids(ids)
@@ -118,11 +127,15 @@ async def get_documents_by_ids(ids: list[str] = Query(...)):
 
 
 @router.delete("/documents")
-async def delete_documents(document_ids: List[str] = Body(...)):
+async def delete_documents(request: Request, document_ids: List[str] = Body(...)):
     try:
         if isinstance(vector_store, AsyncPgVector):
-            existing_ids = await vector_store.get_filtered_ids(document_ids)
-            await vector_store.delete(ids=document_ids)
+            existing_ids = await vector_store.get_filtered_ids(
+                document_ids, executor=request.app.state.thread_pool
+            )
+            await vector_store.delete(
+                ids=document_ids, executor=request.app.state.thread_pool
+            )
         else:
             existing_ids = vector_store.get_filtered_ids(document_ids)
             vector_store.delete(ids=document_ids)
@@ -175,12 +188,11 @@ async def query_embeddings_by_file_id(
         embedding = get_cached_query_embedding(body.query)
 
         if isinstance(vector_store, AsyncPgVector):
-            documents = await run_in_executor(
-                None,
-                vector_store.similarity_search_with_score_by_vector,
+            documents = await vector_store.asimilarity_search_with_score_by_vector(
                 embedding,
                 k=body.k,
                 filter={"file_id": body.file_id},
+                executor=request.app.state.thread_pool,
             )
         else:
             documents = vector_store.similarity_search_with_score_by_vector(
@@ -246,6 +258,7 @@ async def store_data_in_vector_db(
     file_id: str,
     user_id: str = "",
     clean_content: bool = False,
+    executor=None,
 ) -> bool:
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
@@ -274,7 +287,7 @@ async def store_data_in_vector_db(
     try:
         if isinstance(vector_store, AsyncPgVector):
             ids = await vector_store.aadd_documents(
-                docs, ids=[file_id] * len(documents)
+                docs, ids=[file_id] * len(documents), executor=executor
             )
         else:
             ids = vector_store.add_documents(docs, ids=[file_id] * len(documents))
@@ -309,11 +322,21 @@ async def embed_local_file(
         user_id = entity_id if entity_id else request.state.user.get("id")
 
     try:
-        loader, known_type = get_loader(
+        loader, known_type, file_ext = get_loader(
             document.filename, document.file_content_type, document.filepath
         )
-        data = loader.load()
-        result = await store_data_in_vector_db(data, document.file_id, user_id)
+        data = await run_in_executor(request.app.state.thread_pool, loader.load)
+
+        # Clean up temporary UTF-8 file if it was created for encoding conversion
+        cleanup_temp_encoding_file(loader)
+
+        result = await store_data_in_vector_db(
+            data,
+            document.file_id,
+            user_id,
+            clean_content=file_ext == "pdf",
+            executor=request.app.state.thread_pool,
+        )
 
         if result:
             return {
@@ -388,9 +411,17 @@ async def embed_file(
         loader, known_type, file_ext = get_loader(
             file.filename, file.content_type, temp_file_path
         )
-        data = loader.load()
+        data = await run_in_executor(request.app.state.thread_pool, loader.load)
+
+        # Clean up temporary UTF-8 file if it was created for encoding conversion
+        cleanup_temp_encoding_file(loader)
+
         result = await store_data_in_vector_db(
-            data=data, file_id=file_id, user_id=user_id, clean_content=file_ext == "pdf"
+            data=data,
+            file_id=file_id,
+            user_id=user_id,
+            clean_content=file_ext == "pdf",
+            executor=request.app.state.thread_pool,
         )
 
         if not result:
@@ -452,12 +483,16 @@ async def embed_file(
 
 
 @router.get("/documents/{id}/context")
-async def load_document_context(id: str):
+async def load_document_context(request: Request, id: str):
     ids = [id]
     try:
         if isinstance(vector_store, AsyncPgVector):
-            existing_ids = await vector_store.get_filtered_ids(ids)
-            documents = await vector_store.get_documents_by_ids(ids)
+            existing_ids = await vector_store.get_filtered_ids(
+                ids, executor=request.app.state.thread_pool
+            )
+            documents = await vector_store.get_documents_by_ids(
+                ids, executor=request.app.state.thread_pool
+            )
         else:
             existing_ids = vector_store.get_filtered_ids(ids)
             documents = vector_store.get_documents_by_ids(ids)
@@ -519,12 +554,22 @@ async def embed_file_upload(
         )
 
     try:
-        loader, known_type = get_loader(
+        loader, known_type, file_ext = get_loader(
             uploaded_file.filename, uploaded_file.content_type, temp_file_path
         )
 
-        data = loader.load()
-        result = await store_data_in_vector_db(data, file_id, user_id)
+        data = await run_in_executor(request.app.state.thread_pool, loader.load)
+
+        # Clean up temporary UTF-8 file if it was created for encoding conversion
+        cleanup_temp_encoding_file(loader)
+
+        result = await store_data_in_vector_db(
+            data,
+            file_id,
+            user_id,
+            clean_content=file_ext == "pdf",
+            executor=request.app.state.thread_pool,
+        )
 
         if not result:
             raise HTTPException(
@@ -562,19 +607,18 @@ async def embed_file_upload(
 
 
 @router.post("/query_multiple")
-async def query_embeddings_by_file_ids(body: QueryMultipleBody):
+async def query_embeddings_by_file_ids(request: Request, body: QueryMultipleBody):
     try:
         # Get the embedding of the query text
         embedding = get_cached_query_embedding(body.query)
 
         # Perform similarity search with the query embedding and filter by the file_ids in metadata
         if isinstance(vector_store, AsyncPgVector):
-            documents = await run_in_executor(
-                None,
-                vector_store.similarity_search_with_score_by_vector,
+            documents = await vector_store.asimilarity_search_with_score_by_vector(
                 embedding,
                 k=body.k,
                 filter={"file_id": {"$in": body.file_ids}},
+                executor=request.app.state.thread_pool,
             )
         else:
             documents = vector_store.similarity_search_with_score_by_vector(
