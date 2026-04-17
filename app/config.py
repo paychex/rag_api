@@ -71,6 +71,23 @@ MONGO_VECTOR_COLLECTION = get_env_variable(
 CHUNK_SIZE = int(get_env_variable("CHUNK_SIZE", "1500"))
 CHUNK_OVERLAP = int(get_env_variable("CHUNK_OVERLAP", "100"))
 
+# Batch processing configuration for memory-constrained environments.
+# When EMBEDDING_BATCH_SIZE > 0, documents are processed in batches to reduce
+# peak memory usage. This is useful for Kubernetes pods with memory limits.
+#
+# Trade-offs:
+# - Smaller batch size = lower memory, more DB round trips
+# - Larger batch size = higher memory, fewer DB round trips
+# - 0 = disable batching, process all at once
+#
+# Default of 500 is conservative and works well for most embedding providers.
+# Increase to 750 for higher throughput at the cost of higher peak memory.
+EMBEDDING_BATCH_SIZE = int(get_env_variable("EMBEDDING_BATCH_SIZE", "500"))
+
+# Maximum number of batches to buffer in memory during async processing.
+# Higher values allow more parallelism but use more memory.
+EMBEDDING_MAX_QUEUE_SIZE = int(get_env_variable("EMBEDDING_MAX_QUEUE_SIZE", "3"))
+
 env_value = get_env_variable("PDF_EXTRACT_IMAGES", "False").lower()
 PDF_EXTRACT_IMAGES = True if env_value == "true" else False
 
@@ -241,12 +258,18 @@ def init_embeddings(provider, model):
 
         return GoogleGenerativeAIEmbeddings(
             model=model,
-            google_api_key=RAG_GOOGLE_API_KEY,
+            google_api_key=RAG_GOOGLE_API_KEY or None,
         )
     elif provider == EmbeddingsProvider.GOOGLE_VERTEXAI:
-        from langchain_google_vertexai import VertexAIEmbeddings
+        from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-        return VertexAIEmbeddings(model=model)
+        return GoogleGenerativeAIEmbeddings(
+            model=model,
+            google_api_key=RAG_GOOGLE_API_KEY or None,
+            vertexai=True,
+            project=get_env_variable("GOOGLE_CLOUD_PROJECT", None),
+            location=get_env_variable("GOOGLE_CLOUD_LOCATION", "us-central1"),
+        )
     elif provider == EmbeddingsProvider.BEDROCK:
         from langchain_aws import BedrockEmbeddings
 
@@ -290,7 +313,7 @@ elif EMBEDDINGS_PROVIDER == EmbeddingsProvider.HUGGINGFACETEI:
         "EMBEDDINGS_MODEL", "http://huggingfacetei:3000"
     )
 elif EMBEDDINGS_PROVIDER == EmbeddingsProvider.GOOGLE_VERTEXAI:
-    EMBEDDINGS_MODEL = get_env_variable("EMBEDDINGS_MODEL", "text-embedding-004")
+    EMBEDDINGS_MODEL = get_env_variable("EMBEDDINGS_MODEL", "gemini-embedding-001")
 elif EMBEDDINGS_PROVIDER == EmbeddingsProvider.OLLAMA:
     EMBEDDINGS_MODEL = get_env_variable("EMBEDDINGS_MODEL", "nomic-embed-text")
 elif EMBEDDINGS_PROVIDER == EmbeddingsProvider.GOOGLE_GENAI:

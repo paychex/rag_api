@@ -20,10 +20,12 @@ from app.config import (
     VECTOR_DB_TYPE,
     LogMiddleware,
     logger,
+    vector_store,
 )
 from app.middleware import security_middleware
 from app.routes import document_routes, pgvector_routes
 from app.services.database import PSQLDatabase, ensure_vector_indexes
+from app.services.vector_store.factory import close_vector_store_connections
 
 
 @asynccontextmanager
@@ -47,9 +49,24 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup logic
+    if VECTOR_DB_TYPE == VectorDBType.PGVECTOR:
+        try:
+            logger.info("Closing asyncpg connection pool")
+            await PSQLDatabase.close_pool()
+            logger.info("asyncpg connection pool closed")
+        except Exception as e:
+            logger.warning("Failed to close asyncpg pool: %s", e)
+
+    # Drain in-flight work before closing backing resources
     logger.info("Shutting down thread pool")
     app.state.thread_pool.shutdown(wait=True)
     logger.info("Thread pool shutdown complete")
+
+    # Close vector store connections (MongoDB client / SQLAlchemy engine)
+    try:
+        close_vector_store_connections(vector_store)
+    except Exception as e:
+        logger.warning("Failed to close vector store connections: %s", e)
 
 
 app = FastAPI(lifespan=lifespan, debug=debug_mode)
@@ -79,17 +96,10 @@ if debug_mode:
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    body = await request.body()
-    logger.debug(f"Validation error occurred")
-    logger.debug(f"Raw request body: {body.decode()}")
-    logger.debug(f"Validation errors: {exc.errors()}")
+    logger.debug("Validation error: %s", exc.errors())
     return JSONResponse(
         status_code=422,
-        content={
-            "detail": exc.errors(),
-            "body": body.decode(),
-            "message": "Request validation failed",
-        },
+        content={"detail": exc.errors(), "message": "Request validation failed"},
     )
 
 

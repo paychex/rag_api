@@ -9,3 +9,7 @@ venv/
 *.pyc
 dev.yml
 SHOPIFY.md
+
+# docker override file
+docker-compose.override.yaml
+docker-compose.override.yml

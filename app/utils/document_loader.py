@@ -4,7 +4,7 @@ import os
 import codecs
 import tempfile
 
-from typing import List, Optional
+from typing import Iterator, List, Optional
 import chardet
 
 from langchain_core.documents import Document
@@ -82,29 +82,27 @@ def get_loader(filename: str, file_content_type: str, filepath: str):
         encoding = detect_file_encoding(filepath)
 
         if encoding != "utf-8":
-            # For non-UTF-8 encodings, we need to convert the file first
-            # Create a temporary UTF-8 file
+            # For non-UTF-8 encodings, convert to UTF-8 using streaming
+            # to avoid holding the entire file in memory as a single string
             temp_file = None
             try:
                 with tempfile.NamedTemporaryFile(
                     mode="w", encoding="utf-8", suffix=".csv", delete=False
                 ) as temp_file:
-                    # Read the original file with detected encoding
                     with open(
                         filepath, "r", encoding=encoding, errors="replace"
                     ) as original_file:
-                        content = original_file.read()
-                        temp_file.write(content)
+                        while True:
+                            chunk = original_file.read(64 * 1024)
+                            if not chunk:
+                                break
+                            temp_file.write(chunk)
 
                     temp_filepath = temp_file.name
 
-                # Use the temporary UTF-8 file with CSVLoader
                 loader = CSVLoader(temp_filepath)
-
-                # Store the temp file path for cleanup
                 loader._temp_filepath = temp_filepath
             except Exception as e:
-                # If temp file was created but there was an error, clean it up
                 if temp_file and os.path.exists(temp_file.name):
                     os.unlink(temp_file.name)
                 raise e
@@ -235,19 +233,32 @@ class SafePyPDFLoader:
         self.extract_images = extract_images
         self._temp_filepath = None  # For compatibility with cleanup function
 
-    def load(self) -> List[Document]:
-        """Load PDF documents with automatic fallback on image extraction errors."""
+    def lazy_load(self) -> Iterator[Document]:
+        """Lazy load PDF documents with automatic fallback on image extraction errors."""
         loader = PyPDFLoader(self.filepath, extract_images=self.extract_images)
 
+        if not self.extract_images:
+            # No image extraction: no fallback needed, stream directly
+            yield from loader.lazy_load()
+            return
+
+        # extract_images=True: must collect eagerly so that a mid-stream
+        # KeyError doesn't leave already-yielded pages duplicated by the
+        # fallback (yield from + try/except would deliver partial + full).
         try:
-            return loader.load()
+            pages = list(loader.lazy_load())
         except KeyError as e:
-            if "/Filter" in str(e) and self.extract_images:
+            if "/Filter" in str(e):
                 logger.warning(
                     f"PDF image extraction failed for {self.filepath}, falling back to text-only: {e}"
                 )
                 fallback_loader = PyPDFLoader(self.filepath, extract_images=False)
-                return fallback_loader.load()
+                pages = list(fallback_loader.lazy_load())
             else:
                 # Re-raise if it's a different error
                 raise
+        yield from pages
+
+    def load(self) -> List[Document]:
+        """Load PDF documents with automatic fallback on image extraction errors."""
+        return list(self.lazy_load())
