@@ -849,15 +849,23 @@ async def embed_file(
                 detail="Failed to process/store the file data.",
             )
         elif "error" in result:
-            response_status = False
-            response_message = "Failed to process/store the file data."
-            if isinstance(result["error"], str):
-                response_message = result["error"]
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="An unspecified error occurred.",
-                )
+            error_detail = (
+                result["error"]
+                if isinstance(result["error"], str)
+                else "An unspecified error occurred."
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=error_detail,
+            )
+        elif not result.get("ids"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "No content could be extracted from the file. "
+                    "The file may be empty, image-only, or in an unsupported format."
+                ),
+            )
     except HTTPException as http_exc:
         response_status = False
         response_message = f"HTTP Exception: {http_exc.detail}"
