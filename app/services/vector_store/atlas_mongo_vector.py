@@ -55,30 +55,32 @@ class AtlasMongoVector(MongoDBAtlasVectorSearch):
         return processed_documents
 
     def get_all_ids(self) -> list[str]:
-        # Return unique file_id fields in self._collection
-        return self._collection.distinct("file_id")
+        # Return unique file_id values stored under the nested metadata field
+        return self._collection.distinct("metadata.file_id")
 
     def get_filtered_ids(self, ids: list[str]) -> list[str]:
-        # Return unique file_id fields filtered by the provided ids
-        return self._collection.distinct("file_id", {"file_id": {"$in": ids}})
+        # Return unique file_id values filtered by the provided ids
+        return self._collection.distinct(
+            "metadata.file_id", {"metadata.file_id": {"$in": ids}}
+        )
 
     def get_documents_by_ids(self, ids: list[str]) -> list[Document]:
-        # Return documents filtered by file_id
+        # Return documents filtered by file_id stored in the nested metadata field
         return [
             Document(
                 page_content=doc["text"],
                 metadata={
-                    "file_id": doc["file_id"],
-                    "user_id": doc["user_id"],
-                    "digest": doc["digest"],
-                    "source": doc["source"],
-                    "page": int(doc.get("page", 0)),
+                    "file_id": doc["metadata"]["file_id"],
+                    "user_id": doc["metadata"].get("user_id", ""),
+                    "digest": doc["metadata"].get("digest", ""),
+                    "source": doc["metadata"].get("source", ""),
+                    "page": int(doc["metadata"].get("page", 0)),
                 },
             )
-            for doc in self._collection.find({"file_id": {"$in": ids}})
+            for doc in self._collection.find({"metadata.file_id": {"$in": ids}})
         ]
 
     def delete(self, ids: Optional[list[str]] = None) -> None:
-        # Delete documents by file_id
+        # Delete documents by file_id stored in the nested metadata field
         if ids is not None:
-            self._collection.delete_many({"file_id": {"$in": ids}})
+            self._collection.delete_many({"metadata.file_id": {"$in": ids}})
