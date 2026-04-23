@@ -71,9 +71,9 @@ class AtlasMongoVector(MongoDBAtlasVectorSearch):
                 page_content=doc["text"],
                 metadata={
                     "file_id": doc["metadata"]["file_id"],
-                    "user_id": doc["metadata"]["user_id"],
-                    "digest": doc["metadata"]["digest"],
-                    "source": doc["metadata"]["source"],
+                    "user_id": doc["metadata"].get("user_id", ""),
+                    "digest": doc["metadata"].get("digest", ""),
+                    "source": doc["metadata"].get("source", ""),
                     "page": int(doc["metadata"].get("page", 0)),
                 },
             )
